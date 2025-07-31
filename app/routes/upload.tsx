@@ -84,6 +84,7 @@ const Upload = () => {
 
     setIsProcessing(false);
     setStatusText("Analysis Complete, redirecting...");
+    navigate(`/resume/${uuid}`);
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
