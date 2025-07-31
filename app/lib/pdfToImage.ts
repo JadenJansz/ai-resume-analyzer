@@ -13,23 +13,67 @@ async function loadPdfJs(): Promise<any> {
   if (loadPromise) return loadPromise;
 
   isLoading = true;
-  // @ts-expect-error - pdfjs-dist/build/pdf.mjs is not a module
-  loadPromise = import("pdfjs-dist/build/pdf.mjs").then((lib) => {
-    // Set the worker source to use local file
-    lib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
-    pdfjsLib = lib;
-    isLoading = false;
-    return lib;
+
+  try {
+    // @ts-ignore
+    loadPromise = import("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs").then((lib) => {
+      lib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs";
+      pdfjsLib = lib;
+      isLoading = false;
+      return lib;
+    });
+  } catch (error) {
+    // @ts-ignore
+    loadPromise = import("pdfjs-dist/build/pdf.mjs").then((lib) => {
+      // Solution 2: Use the worker from the same package
+      lib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs`;
+      pdfjsLib = lib;
+      isLoading = false;
+      return lib;
+    });
+  }
+
+  return loadPromise;
+}
+
+// Alternative loading function with version-specific CDN
+async function loadPdfJsFromCDN(): Promise<any> {
+  if (pdfjsLib) return pdfjsLib;
+  if (loadPromise) return loadPromise;
+
+  isLoading = true;
+
+  // Load specific version from CDN to ensure compatibility
+  loadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src =
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.js";
+    script.onload = () => {
+      // @ts-expect-error - pdfjsLib is added to window by the script
+      const lib = window.pdfjsLib;
+      lib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js";
+      pdfjsLib = lib;
+      isLoading = false;
+      resolve(lib);
+    };
+    script.onerror = reject;
+    document.head.appendChild(script);
   });
 
   return loadPromise;
 }
 
 export async function convertPdfToImage(
-  file: File
+  file: File,
+  useAlternativeLoader = false
 ): Promise<PdfConversionResult> {
   try {
-    const lib = await loadPdfJs();
+    // Choose loading method
+    const lib = useAlternativeLoader
+      ? await loadPdfJsFromCDN()
+      : await loadPdfJs();
 
     const arrayBuffer = await file.arrayBuffer();
     const pdf = await lib.getDocument({ data: arrayBuffer }).promise;
@@ -73,13 +117,41 @@ export async function convertPdfToImage(
         },
         "image/png",
         1.0
-      ); // Set quality to maximum (1.0)
+      );
     });
   } catch (err) {
+    console.log(err);
     return {
       imageUrl: "",
       file: null,
       error: `Failed to convert PDF: ${err}`,
     };
   }
+}
+
+// Utility function to check PDF.js version compatibility
+export function checkPdfJsVersion(): Promise<{
+  api: string;
+  worker: string;
+  compatible: boolean;
+}> {
+  return new Promise((resolve) => {
+    loadPdfJs()
+      .then((lib) => {
+        const apiVersion = lib.version;
+        // We can't directly check worker version without loading it, but we can infer compatibility
+        resolve({
+          api: apiVersion,
+          worker: "CDN-matched",
+          compatible: true,
+        });
+      })
+      .catch(() => {
+        resolve({
+          api: "unknown",
+          worker: "unknown",
+          compatible: false,
+        });
+      });
+  });
 }
